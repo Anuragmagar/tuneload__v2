@@ -46,7 +46,8 @@ class _SearchPageState extends State<SearchPage> {
       try {
         final response = await http.post(
           // Uri.parse("http://anuragmagar.pythonanywhere.com/"),
-          Uri.parse("https://tuneloadbackend.onrender.com/"),
+          // Uri.parse("https://tuneloadbackend.onrender.com/"),
+          Uri.parse("http://tuneload.anuragmagar.com.np/"),
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
           },
@@ -306,7 +307,8 @@ class _SearchPageState extends State<SearchPage> {
                                   itemCount: results.length,
                                   itemBuilder: (context, index) {
                                     final item = results[index];
-                                    // print(item.thumbnails);
+
+                                    print(item);
                                     // final item =
                                     //     results?.items[index];
 

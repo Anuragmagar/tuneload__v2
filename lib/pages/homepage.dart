@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,32 +32,42 @@ class _HomepageState extends ConsumerState<Homepage> {
   bool hasError = false;
   String errorMsg = ' ';
   int totalSongs = 0;
-  String token =
-      "BQDLuvGbG2ls8qNNkvml15ekfDrjUJrtby67LLYsgn5gyHgCen32-5SbDWKT_AfTUcKrgDoCTPOfQVbubd9mbYlK5MQ1_MH3XNaKupBONoW6LxXXG0A";
+  // String token =
+  // "BQDLuvGbG2ls8qNNkvml15ekfDrjUJrtby67LLYsgn5gyHgCen32-5SbDWKT_AfTUcKrgDoCTPOfQVbubd9mbYlK5MQ1_MH3XNaKupBONoW6LxXXG0A";
 
-  getAccessToken() async {
-    ref.read(isRecommendLoaded.notifier).state = false;
-    try {
-      final response = await http
-          .post(Uri.parse("https://accounts.spotify.com/api/token"), headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      }, body: {
-        "grant_type": "client_credentials",
-        "client_id": "5d9129c2a9224eb8903668e80796b1cf",
-        "client_secret": "50a052bfbfaf4934b33537202098b3f0",
-      });
-      final body = json.decode(response.body);
-      setState(() {
-        token = body["access_token"];
-      });
-      getRecommendation();
-    } catch (e) {
-      debugPrint("$e");
-    }
-  }
+  // getAccessToken() async {
+  //   ref.read(isRecommendLoaded.notifier).state = false;
+  //   try {
+  //     final response = await http
+  //         .post(Uri.parse("https://accounts.spotify.com/api/token"), headers: {
+  //       "Content-Type": "application/x-www-form-urlencoded",
+  //     }, body: {
+  //       "grant_type": "client_credentials",
+  //       "client_id": "5d9129c2a9224eb8903668e80796b1cf",
+  //       "client_secret": "50a052bfbfaf4934b33537202098b3f0",
+  //     });
+  //     final body = json.decode(response.body);
+  //     setState(() {
+  //       token = body["access_token"];
+  //     });
+  //     getRecommendation();
+  //   } catch (e) {
+  //     debugPrint("$e");
+  //   }
+  // }
 
   void getRecommendation() async {
     // final ass = await getAccessToken();
+    final List<String> seedVideoIds = [
+      "jElsEQqqun0",
+      "d9w6_6mZQZE",
+      "6gvt_1t-nGY",
+      "mRNcPbCJNJ8",
+      "_VXUiAJi5KY",
+      "vLtmmFjxSoc",
+      "-VoOwVC24Uo",
+    ];
+    final randomVideoId = seedVideoIds[Random().nextInt(seedVideoIds.length)];
     setState(() {
       hasError = false;
       errorMsg = ' ';
@@ -63,26 +75,45 @@ class _HomepageState extends ConsumerState<Homepage> {
       isSearchTap = true;
     });
     try {
-      final response = await http.get(
-        Uri.parse(
-            "https://api.spotify.com/v1/recommendations?seed_artists=1RyvyyTE3xzB2ZywiAwp0i%2C0iEtIxbK0KxaSlF7G42ZOp%2C1deQzOQwArAsUgm2WdjtyI%2C00FQb4jTyendYWaN8pK0wa%2C3sauLUNFUPvJVWIADSYTvZ"),
+      final response = await http.post(
+        Uri.parse("http://tuneload.anuragmagar.com.np/recommend"),
         headers: {
-          "Content-Type": "application/json",
-          "authorization": "Bearer $token"
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: {
+          "videoId": randomVideoId,
         },
       );
       final body = json.decode(response.body);
+      print('fetched successfully');
+      print(body.toString());
       final errorstat = body['error'];
       if (errorstat != null) {
         setState(() {
           hasError = true;
           errorMsg = body['error']['message'];
         });
-        int errorCode = body['error']['status'];
-        if (errorCode == 401) {
-          getAccessToken();
-        }
       }
+      // final response = await http.get(
+      //   Uri.parse(
+      //       "https://api.spotify.com/v1/recommendations?seed_artists=1RyvyyTE3xzB2ZywiAwp0i%2C0iEtIxbK0KxaSlF7G42ZOp%2C1deQzOQwArAsUgm2WdjtyI%2C00FQb4jTyendYWaN8pK0wa%2C3sauLUNFUPvJVWIADSYTvZ"),
+      //   headers: {
+      //     "Content-Type": "application/json",
+      //     "authorization": "Bearer $token"
+      //   },
+      // );
+      // final body = json.decode(response.body);
+      // final errorstat = body['error'];
+      // if (errorstat != null) {
+      //   setState(() {
+      //     hasError = true;
+      //     errorMsg = body['error']['message'];
+      //   });
+      //   int errorCode = body['error']['status'];
+      //   if (errorCode == 401) {
+      //     getAccessToken();
+      //   }
+      // }
       setState(() {
         isSearching = false;
         isSearchTap = false;
@@ -175,7 +206,8 @@ class _HomepageState extends ConsumerState<Homepage> {
 
     var reco = ref.read(isRecommendLoaded);
     if (reco != true) {
-      getAccessToken();
+      // getAccessToken();
+      getRecommendation();
     }
     // getStoredData();
   }
@@ -184,8 +216,7 @@ class _HomepageState extends ConsumerState<Homepage> {
   Widget build(BuildContext context) {
     final recomm = ref.watch(recommendationProvider);
     final isRecomLoaded = ref.watch(isRecommendLoaded);
-
-    // print(recomm['ldf'].length);
+    print(recomm['count']);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -279,7 +310,7 @@ class _HomepageState extends ConsumerState<Homepage> {
             ),
             const Spacer(),
             IconButton(
-              onPressed: getAccessToken,
+              onPressed: getRecommendation,
               icon: const Icon(
                 PhosphorIconsRegular.arrowClockwise,
                 color: Colors.white,
@@ -339,9 +370,9 @@ class _HomepageState extends ConsumerState<Homepage> {
               ? ListView.builder(
                   scrollDirection: Axis.horizontal,
                   // itemCount: results['tracks'].length,
-                  itemCount: recomm['tracks'].length,
+                  itemCount: recomm['count'],
                   itemBuilder: (context, index) {
-                    final item = recomm['tracks'][index];
+                    final item = recomm['songs'][index];
                     // final item = results['tracks'][index];
                     // final item = recomm.elementAt(index);
 
@@ -350,10 +381,74 @@ class _HomepageState extends ConsumerState<Homepage> {
                         .toList();
                     String combinedArtistNames = artistNames.join(', ');
 
+                    print('combinedArtistNames: $combinedArtistNames');
+                    final widthRegex = RegExp(r'w\d+-');
+                    // Replace 'w' followed by digits and '-' with 'w540-'
+                    String highResImageUrl = item['thumbnails']
+                        .last['url']
+                        .replaceAll(widthRegex, 'w540-');
+
+                    // Use regular expression to find 'h' followed by digits and '-'
+                    final heightRegex = RegExp(r'h\d+-');
+                    highResImageUrl =
+                        highResImageUrl.replaceAll(heightRegex, 'h540-');
+
                     return GestureDetector(
                       onTap: () async {
-                        songDetailpageRouter(
-                            item['name'], item['artists'][0]['name']);
+                        try {
+                          showDialog(
+                            barrierDismissible: false,
+                            context: context,
+                            builder: (_) => const Center(
+                                child: CircularProgressIndicator()),
+                          );
+                          final response = await http.post(
+                            Uri.parse("http://tuneload.anuragmagar.com.np/"),
+                            headers: {
+                              "Content-Type":
+                                  "application/x-www-form-urlencoded",
+                            },
+                            body: {
+                              "song": item['videoId'],
+                            },
+                          );
+                          final body = json.decode(response.body);
+
+                          Navigator.of(context).pop();
+
+                          final firstItem = (body is List && body.isNotEmpty)
+                              ? body[0]
+                              : null;
+
+                          if (firstItem == null) {
+                            print("⚠ No result found for song search");
+                            return;
+                          }
+
+                          Get.to(
+                            () => SongDetailPage(
+                              firstItem,
+                              combinedArtistNames,
+                              highResImageUrl,
+                            ),
+                            transition: Transition.rightToLeft,
+                            duration: const Duration(milliseconds: 300),
+                          );
+                        } catch (e) {
+                          print("Error in onTap: $e");
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text("Error: $e")),
+                          );
+                        }
+
+                        // songDetailpageRouter(
+                        //     item['name'], item['artists'][0]['name']);
+                        // Get.to(
+                        //   () => SongDetailPage(
+                        //       item, combinedArtistNames, highResImageUrl),
+                        //   transition: Transition.rightToLeft,
+                        //   duration: const Duration(milliseconds: 300),
+                        // );
                       },
                       child: SizedBox(
                         width: 200,
@@ -369,7 +464,8 @@ class _HomepageState extends ConsumerState<Homepage> {
                                     const Color.fromRGBO(217, 107, 107, 0.36),
                                 child: Image(
                                   image: NetworkImage(
-                                    item['album']['images'][0]['url'],
+                                    // item['album']['images'][0]['url'],
+                                    item['thumbnails'].last['url'],
                                   ),
                                   fit: BoxFit.contain,
                                   loadingBuilder: (BuildContext context,
@@ -393,7 +489,8 @@ class _HomepageState extends ConsumerState<Homepage> {
                               ),
                               const SizedBox(height: 10),
                               Text(
-                                item['name'],
+                                item['title'] ??
+                                    'Unknown Title', // Fallback in case title is null
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
