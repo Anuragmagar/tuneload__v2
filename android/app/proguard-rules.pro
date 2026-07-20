@@ -1,0 +1,5 @@
+-dontwarn java.awt.image.BufferedImage
+-dontwarn javax.imageio.ImageIO
+-dontwarn javax.imageio.stream.ImageInputStream
+-dontwarn org.jaudiotagger.**
+-keep class org.jaudiotagger.** { *; }
