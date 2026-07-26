@@ -45,15 +45,26 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       systemNavigationBarColor: Color.fromARGB(255, 35, 37, 46),
-      // systemNavigationBarDividerColor: Colors.white,
-      // statusBarColor: Colors.pink, // status bar color
-      // systemNavigationBarIconBrightness: Brightness.light,
+      statusBarColor: Colors.black,
+      statusBarBrightness: Brightness.dark,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarIconBrightness: Brightness.light,
     ));
     return GetMaterialApp(
       theme: ThemeData(
         fontFamily: 'Circular',
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.deepPurple,
+          brightness: Brightness.dark,
+        ),
         useMaterial3: true,
+        appBarTheme: const AppBarTheme(
+          systemOverlayStyle: SystemUiOverlayStyle(
+            statusBarColor: Colors.black,
+            statusBarBrightness: Brightness.dark,
+            statusBarIconBrightness: Brightness.light,
+          ),
+        ),
       ),
       home: const MyHomePage(),
       debugShowCheckedModeBanner: false,
