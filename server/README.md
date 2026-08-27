@@ -100,6 +100,25 @@ YouTube changes its extraction frequently. The client library
 once a day, the server runs `yt-dlp -U` (self-update), so it keeps working
 with **zero code changes** on your side. That's the maintenance answer.
 
+> Note: self-update is best-effort and runs in a background thread, so a
+> GitHub rate-limit or network blip never crashes the server.
+
+## If the server IP is bot-flagged ("Sign in to confirm you're not a bot")
+
+yt-dlp rotates YouTube player clients (`default`, `tv`, `android`, `ios`, ...)
+automatically, which clears the bot check on most flagged IPs. If that still
+fails, provide your browser's YouTube cookies:
+
+1. Export cookies as **Netscape `cookies.txt`** (e.g. a browser extension).
+   You only need cookies for `youtube.com` / `.youtube.com`.
+2. Base64-encode the file and set it as a Render **env var**:
+   ```bash
+   # quick base64 on Windows PowerShell:
+   $b = [Convert]::ToBase64String([IO.File]::ReadAllBytes("path\cookies.txt"))
+   ```
+   Set `YTDLP_COOKIES_B64 = <that base64 string>` on the Render service.
+3. Redeploy. The server writes it to a temp file at boot and yt-dlp uses it.
+
 ## Notes
 - The stream URL returned is a `googlevideo.com` URL that works on any device.
 - Rate limit (5/min/IP) is intentionally low — the app only calls this as a

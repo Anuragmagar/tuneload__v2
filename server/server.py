@@ -30,6 +30,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import yt_dlp
 
+import base64
+import tempfile
+
 app = Flask(__name__)
 limiter = Limiter(
     get_remote_address,
@@ -44,6 +47,30 @@ BASIC_AUTH_PASS = os.environ.get("BASIC_AUTH_PASS", "")
 _UPDATE_LOCK = threading.Lock()
 _LAST_UPDATE = 0.0
 UPDATE_INTERVAL = 60 * 60 * 24  # refresh yt-dlp binary once a day
+
+
+def _materialize_cookies() -> str:
+    """Writes YouTube cookies to a temp file if provided via env var.
+
+    Cookies solve YouTube's "Sign in to confirm you're not a bot" on flagged
+    IPs. Provide them as base64 (Netscape/cookies.txt format) in
+    `YTDLP_COOKIES_B64` so no file upload is needed on Render.
+    """
+    b64 = os.environ.get("YTDLP_COOKIES_B64", "")
+    if not b64:
+        return ""
+    try:
+        data = base64.b64decode(b64)
+        fd, path = tempfile.mkstemp(suffix=".txt")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data.decode("utf-8"))
+        return path
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] could not decode YTDLP_COOKIES_B64: {e}", flush=True)
+        return ""
+
+
+COOKIES_FILE = _materialize_cookies()
 
 
 def _youtube_id(video_id: str) -> bool:
@@ -115,17 +142,42 @@ def stream():
     if not _youtube_id(vid):
         return jsonify({"error": "invalid video id"}), 400
 
+    # Player clients to try in order. YouTube bot-checks some clients on
+    # flagged IPs; rotating through them (esp. `tv` / `android`) usually gets
+    # past it without cookies on most networks.
+    PLAYER_CLIENTS = [
+        "default",
+        "tv",
+        "android",
+        "ios",
+        "web_embedded",
+        "tv_embedded",
+    ]
+
+    def _info_with_clients(video_id):
+        last_err = None
+        for client in PLAYER_CLIENTS:
+            opts = {
+                "format": "bestaudio/best",
+                "noplaylist": True,
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "extractor_args": {"youtube": {"player_client": [client]}},
+            }
+            if os.path.exists(COOKIES_FILE):
+                opts["cookiefile"] = COOKIES_FILE
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    return ydl.extract_info(video_id, download=False)
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                continue
+        raise last_err
+
     try:
         _ensure_updated()
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(vid, download=False)
+        info = _info_with_clients(vid)
 
         if not info or info.get("_type") == "playlist":
             return jsonify({"error": "no video found"}), 404
