@@ -15,5 +15,6 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-# Keep it working across YouTube changes: refresh the yt-dlp binary on boot.
-CMD ["sh", "-c", "python -m yt_dlp -U && gunicorn -w 2 -b 0.0.0.0:8080 server:app"]
+# Keep it working across YouTube changes: the app refreshes the yt-dlp binary
+# in the background (best-effort, never crashes the container), so just start.
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:8080", "server:app"]

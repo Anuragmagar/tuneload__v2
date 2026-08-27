@@ -67,24 +67,36 @@ def _check_auth() -> Optional[Response]:
 
 
 def _ensure_updated():
-    """Refreshes yt-dlp daily so it keeps working as YouTube changes."""
+    """Refreshes yt-dlp so it keeps working as YouTube changes.
+
+    Runs in a background thread and is best-effort. Never delays or crashes
+    a request, and a failed update (e.g. GitHub rate limit) is retried soon
+    instead of waiting a whole day.
+    """
     global _LAST_UPDATE
     now = time.time()
     if now - _LAST_UPDATE < UPDATE_INTERVAL:
         return
-    with _UPDATE_LOCK:
-        if now - _LAST_UPDATE < UPDATE_INTERVAL:
-            return
-        try:
-            subprocess.run(
-                [sys.executable, "-m", "yt_dlp", "-U"],
-                capture_output=True,
-                timeout=120,
-            )
-        except Exception:
-            pass
-        finally:
-            _LAST_UPDATE = time.time()
+
+    def _run():
+        global _LAST_UPDATE
+        with _UPDATE_LOCK:
+            if time.time() - _LAST_UPDATE < UPDATE_INTERVAL:
+                return
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "yt_dlp", "-U"],
+                    capture_output=True,
+                    timeout=120,
+                )
+                if result.returncode == 0:
+                    _LAST_UPDATE = time.time()
+                else:
+                    _LAST_UPDATE = time.time() - (UPDATE_INTERVAL - 900)
+            except Exception:
+                _LAST_UPDATE = time.time() - (UPDATE_INTERVAL - 900)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 @app.get("/health")
