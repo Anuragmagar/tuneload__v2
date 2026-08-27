@@ -128,7 +128,13 @@ def _ensure_updated():
 
 @app.get("/health")
 def health():
-    return jsonify({"ok": True, "yt_dlp": yt_dlp.version.__version__})
+    return jsonify(
+        {
+            "ok": True,
+            "yt_dlp": yt_dlp.version.__version__,
+            "cookies": bool(COOKIES_FILE and os.path.exists(COOKIES_FILE)),
+        }
+    )
 
 
 @app.get("/stream")
