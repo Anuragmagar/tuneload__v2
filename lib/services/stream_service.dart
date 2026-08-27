@@ -168,6 +168,21 @@ class StreamService {
     }
   }
 
+  /// Returns the server URL that RELAYS the audio bytes for [videoId].
+  ///
+  /// googlevideo stream URLs are IP-locked to whoever requested them, so a
+  /// URL-returning proxy won't play on a different device. `/proxy` downloads
+  /// the audio on the server (from its own IP, with cookies) and streams the
+  /// bytes to this device, which just plays this endpoint directly.
+  static String resolveProxyUrlFromServer(String videoId) {
+    if (!isServerFallbackConfigured) {
+      throw YoutubeSdkException('Server fallback is not configured.');
+    }
+    final base =
+        AppConfig.streamServerBaseUrl.replaceFirst(RegExp(r'/+$'), '');
+    return '$base/proxy?vid=$videoId';
+  }
+
   static String _clientName(YoutubeApiClient client) {
     try {
       return (client.payload['context']['client']['clientName'] ?? '?').toString();

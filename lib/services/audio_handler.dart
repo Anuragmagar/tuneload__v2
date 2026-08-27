@@ -63,11 +63,13 @@ class AudioHandler {
       }
 
       // If every direct client is blocked (e.g. this device's IP is
-      // bot-flagged), fall back to the server-side resolver.
+      // bot-flagged), fall back to the server-side proxy. First hit /stream to
+      // warm the server (Render cold-starts can take ~30-50s) and confirm the
+      // video resolves, then play the /proxy endpoint that relays the audio.
       if (!succeeded && StreamService.isServerFallbackConfigured) {
         try {
-          _resolvedUrl =
-              await StreamService.resolveStreamUrlFromServer(song.videoId);
+          await StreamService.resolveStreamUrlFromServer(song.videoId);
+          _resolvedUrl = StreamService.resolveProxyUrlFromServer(song.videoId);
           await _tryPlayResolved();
           succeeded = true;
         } catch (e) {

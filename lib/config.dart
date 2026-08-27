@@ -8,7 +8,7 @@ class AppConfig {
   /// (e.g. the user's IP is bot-flagged).
   ///
   /// Set to an empty string to disable the server fallback entirely.
-  static const String streamServerBaseUrl = 'https://your-server.example.com';
+  static const String streamServerBaseUrl = 'https://tuneload-v2.onrender.com';
 
   /// Optional HTTP Basic auth username/password if the server is protected.
   /// Leave empty if the server has no auth.

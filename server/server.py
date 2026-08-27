@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from typing import Optional
 
 from flask import Flask, Response, jsonify, request
@@ -34,6 +35,11 @@ import base64
 import tempfile
 
 app = Flask(__name__)
+
+UA = (
+    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
+)
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -126,6 +132,75 @@ def _ensure_updated():
     threading.Thread(target=_run, daemon=True).start()
 
 
+# Player clients to try in order. YouTube bot-checks some clients on flagged
+# IPs; rotating through them (esp. `tv` / `android`) usually gets past it
+# without cookies on most networks.
+PLAYER_CLIENTS = [
+    "default",
+    "tv",
+    "android",
+    "ios",
+    "web_embedded",
+    "tv_embedded",
+]
+
+
+def _info_with_clients(video_id):
+    last_err = None
+    for client in PLAYER_CLIENTS:
+        opts = {
+            "format": "bestaudio/best",
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "extractor_args": {"youtube": {"player_client": [client]}},
+        }
+        if os.path.exists(COOKIES_FILE):
+            opts["cookiefile"] = COOKIES_FILE
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(video_id, download=False)
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            continue
+    raise last_err
+
+
+def _pick_audio(info):
+    """Returns the best audio (url, mime) from extracted format info."""
+    candidates = []
+    for f in info.get("formats", []):
+        if f.get("url") and f.get("acodec") not in ("none", None):
+            candidates.append(f)
+    if not candidates:
+        return None
+    # Prefer m4a/webm audio-only over progressive (video+audio) fallbacks.
+    def _rank(f):
+        audio_only = f.get("vcodec") in ("none", None)
+        return (audio_only, f.get("tbr") or 0)
+
+    candidates.sort(key=_rank, reverse=True)
+    f = candidates[0]
+    mime = (f.get("ext") or "").lower()
+    if mime in ("m4a", "mp4"):
+        mime = "audio/mp4"
+    elif mime == "webm":
+        mime = "audio/webm"
+    else:
+        mime = "application/octet-stream"
+    return f["url"], mime
+
+
+def _resolve_audio(info):
+    if not info or info.get("_type") == "playlist":
+        raise ValueError("no video found")
+    picked = _pick_audio(info)
+    if not picked:
+        raise ValueError("no playable stream")
+    return picked
+
+
 @app.get("/health")
 def health():
     return jsonify(
@@ -148,59 +223,10 @@ def stream():
     if not _youtube_id(vid):
         return jsonify({"error": "invalid video id"}), 400
 
-    # Player clients to try in order. YouTube bot-checks some clients on
-    # flagged IPs; rotating through them (esp. `tv` / `android`) usually gets
-    # past it without cookies on most networks.
-    PLAYER_CLIENTS = [
-        "default",
-        "tv",
-        "android",
-        "ios",
-        "web_embedded",
-        "tv_embedded",
-    ]
-
-    def _info_with_clients(video_id):
-        last_err = None
-        for client in PLAYER_CLIENTS:
-            opts = {
-                "format": "bestaudio/best",
-                "noplaylist": True,
-                "quiet": True,
-                "no_warnings": True,
-                "skip_download": True,
-                "extractor_args": {"youtube": {"player_client": [client]}},
-            }
-            if os.path.exists(COOKIES_FILE):
-                opts["cookiefile"] = COOKIES_FILE
-            try:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    return ydl.extract_info(video_id, download=False)
-            except Exception as e:  # noqa: BLE001
-                last_err = e
-                continue
-        raise last_err
-
     try:
         _ensure_updated()
         info = _info_with_clients(vid)
-
-        if not info or info.get("_type") == "playlist":
-            return jsonify({"error": "no video found"}), 404
-
-        # Prefer a direct progressive/audio-only webm/m4a URL that just_audio
-        # can stream.
-        url = None
-        for f in info.get("formats", []):
-            if f.get("url") and f.get("acodec") not in ("none", None):
-                url = f["url"]
-                break
-        if not url:
-            url = info.get("url") or info.get("webpage_url")
-
-        if not url:
-            return jsonify({"error": "no playable stream"}), 404
-
+        url, _ = _resolve_audio(info)
         return jsonify(
             {
                 "url": url,
@@ -210,8 +236,58 @@ def stream():
         )
     except yt_dlp.utils.DownloadError as e:
         return jsonify({"error": "download_error", "detail": str(e)}), 502
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": "internal", "detail": str(e)}), 500
+
+
+@app.get("/proxy")
+@limiter.limit("6 per minute")
+def proxy():
+    """Streams (relays) the audio bytes to the client.
+
+    google stream URLs are IP-locked to the requester, so a URL-returning
+    proxy doesn't work cross-IP. Instead we download the audio on the server
+    (from the server's own IP, with cookies) and stream the bytes back to the
+    app. The app plays this endpoint directly.
+    """
+    auth = _check_auth()
+    if auth:
+        return auth
+
+    vid = request.args.get("vid", "")
+    if not _youtube_id(vid):
+        return jsonify({"error": "invalid video id"}), 400
+
+    try:
+        _ensure_updated()
+        info = _info_with_clients(vid)
+        url, mime = _resolve_audio(info)
+    except yt_dlp.utils.DownloadError as e:
+        return jsonify({"error": "download_error", "detail": str(e)}), 502
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": "internal", "detail": str(e)}), 500
+
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    upstream = urllib.request.urlopen(req, timeout=60)
+
+    def generate():
+        try:
+            while True:
+                chunk = upstream.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            upstream.close()
+
+    resp = Response(generate(), mimetype=mime)
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["Accept-Ranges"] = "bytes"
+    return resp
 
 
 @app.get("/update")
