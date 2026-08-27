@@ -54,6 +54,29 @@ _UPDATE_LOCK = threading.Lock()
 _LAST_UPDATE = 0.0
 UPDATE_INTERVAL = 60 * 60 * 24  # refresh yt-dlp binary once a day
 
+# Resolved URL cache: `/stream` warms the server and `/proxy` then streams
+# instantly from cache, avoiding a second slow yt-dlp extraction (and the
+# Render cold-start/free-tier flakiness) inside the streaming request.
+_URL_CACHE = {}
+_URL_CACHE_LOCK = threading.Lock()
+_URL_CACHE_TTL = 5 * 60
+
+
+def _resolve_cached(video_id):
+    """Returns (url, mime, info) from cache if fresh, else resolves + caches."""
+    with _URL_CACHE_LOCK:
+        entry = _URL_CACHE.get(video_id)
+        if entry and time.time() - entry[0] < _URL_CACHE_TTL:
+            return entry[1], entry[2], entry[3]
+
+    _ensure_updated()
+    info = _info_with_clients(video_id)
+    url, mime = _resolve_audio(info)
+
+    with _URL_CACHE_LOCK:
+        _URL_CACHE[video_id] = (time.time(), url, mime, info)
+    return url, mime, info
+
 
 def _materialize_cookies() -> str:
     """Writes YouTube cookies to a temp file if provided via env var.
@@ -224,9 +247,7 @@ def stream():
         return jsonify({"error": "invalid video id"}), 400
 
     try:
-        _ensure_updated()
-        info = _info_with_clients(vid)
-        url, _ = _resolve_audio(info)
+        url, _, info = _resolve_cached(vid)
         return jsonify(
             {
                 "url": url,
@@ -261,9 +282,7 @@ def proxy():
         return jsonify({"error": "invalid video id"}), 400
 
     try:
-        _ensure_updated()
-        info = _info_with_clients(vid)
-        url, mime = _resolve_audio(info)
+        url, mime, _ = _resolve_cached(vid)
     except yt_dlp.utils.DownloadError as e:
         return jsonify({"error": "download_error", "detail": str(e)}), 502
     except ValueError as e:

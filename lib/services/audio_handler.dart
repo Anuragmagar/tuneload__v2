@@ -66,18 +66,28 @@ class AudioHandler {
       // bot-flagged), fall back to the server-side proxy. First hit /stream to
       // warm the server (Render cold-starts can take ~30-50s) and confirm the
       // video resolves, then play the /proxy endpoint that relays the audio.
+      // Retry because Render's free tier is transiently flaky (cold-start 502s).
       if (!succeeded && StreamService.isServerFallbackConfigured) {
-        try {
-          await StreamService.resolveStreamUrlFromServer(song.videoId);
-          _resolvedUrl = StreamService.resolveProxyUrlFromServer(song.videoId);
-          await _tryPlayResolved();
-          succeeded = true;
-        } catch (e) {
-          debugPrint('AudioHandler: server fallback failed: $e');
-          lastError = e is YoutubeSdkException
-              ? e
-              : YoutubeSdkException.fromYoutube(e);
-          await player.stop();
+        for (var attempt = 1; attempt <= 3; attempt++) {
+          try {
+            await StreamService.resolveStreamUrlFromServer(song.videoId);
+            _resolvedUrl =
+                StreamService.resolveProxyUrlFromServer(song.videoId);
+            await _tryPlayResolved();
+            succeeded = true;
+            break;
+          } catch (e) {
+            debugPrint(
+              'AudioHandler: server fallback attempt $attempt/3 failed: $e',
+            );
+            lastError = e is YoutubeSdkException
+                ? e
+                : YoutubeSdkException.fromYoutube(e);
+            await player.stop();
+            if (attempt < 3) {
+              await Future<void>.delayed(const Duration(seconds: 3));
+            }
+          }
         }
       }
 
