@@ -1,11 +1,13 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:get/get.dart' hide Rx; // hide Rx to avoid conflict with rxdart
 import 'package:just_audio/just_audio.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:tuneload/manager/audio_player_manager.dart';
 import 'package:tuneload/models/song_item.dart';
 import 'package:tuneload/services/stream_service.dart';
+import 'package:tuneload/services/youtube_sdk_exception.dart';
 
 class AudioHandler {
   AudioHandler._();
@@ -34,21 +36,107 @@ class AudioHandler {
       isLoadingStream.value = true;
       currentSong.value = song;
 
-      final streamUrl = await StreamService.getStreamUrl(song.videoId);
+      // Try each YouTube client in order. A client may resolve a URL that
+      // still fails to play (YouTube 403s the actual stream), so we only
+      // accept a client whose stream actually starts playing.
+      var lastError = YoutubeSdkException(
+        'Could not get the song link right now. Please try again.',
+      );
+      var succeeded = false;
 
-      if (streamUrl == null) {
-        debugPrint('AudioHandler: Failed to get stream URL for ${song.videoId}');
-        isLoadingStream.value = false;
-        return;
+      for (final client in StreamService.clients) {
+        if (succeeded) break;
+        try {
+          _resolvedUrl = await StreamService.resolveStreamUrlWithClient(
+            song.videoId,
+            client,
+          );
+          await _tryPlayResolved();
+          succeeded = true;
+        } catch (e) {
+          debugPrint('AudioHandler: client failed to play: $e');
+          lastError = e is YoutubeSdkException
+              ? e
+              : YoutubeSdkException.fromYoutube(e);
+          await player.stop();
+        }
       }
 
-      _resolvedUrl = streamUrl;
-      await player.setUrl(streamUrl);
+      // If every direct client is blocked (e.g. this device's IP is
+      // bot-flagged), fall back to the server-side resolver.
+      if (!succeeded && StreamService.isServerFallbackConfigured) {
+        try {
+          _resolvedUrl =
+              await StreamService.resolveStreamUrlFromServer(song.videoId);
+          await _tryPlayResolved();
+          succeeded = true;
+        } catch (e) {
+          debugPrint('AudioHandler: server fallback failed: $e');
+          lastError = e is YoutubeSdkException
+              ? e
+              : YoutubeSdkException.fromYoutube(e);
+          await player.stop();
+        }
+      }
+
+      if (!succeeded) {
+        _resolvedUrl = '';
+        _showStreamError(lastError);
+      }
+    } finally {
       isLoadingStream.value = false;
+    }
+  }
+
+  // Plays the currently resolved URL.
+  //
+  // just_audio reports load failures (e.g. YouTube 403s when the stream is
+  // actually fetched) ASYNCHRONOUSLY through the playback event stream's
+  // onError, not as a thrown exception from setUrl/play. So we subscribe to
+  // the stream and resolve a completer either on success (stream became
+  // ready/buffering) or on error, and let the caller rotate to the next
+  // client if it fails.
+  Future<void> _tryPlayResolved() async {
+    final completer = Completer<void>();
+    StreamSubscription<PlaybackEvent>? sub;
+
+    sub = player.playbackEventStream.listen(
+      (event) {
+        final state = event.processingState;
+        if (state == ProcessingState.ready ||
+            state == ProcessingState.buffering) {
+          if (!completer.isCompleted) completer.complete();
+        }
+      },
+      onError: (Object e) {
+        if (!completer.isCompleted) {
+          completer.completeError(YoutubeSdkException.fromYoutube(e));
+        }
+      },
+    );
+
+    try {
+      await player.setUrl(_resolvedUrl);
       await player.play();
-    } catch (e) {
-      debugPrint('AudioHandler: Error playing song: $e');
-      isLoadingStream.value = false;
+      await completer.future.timeout(const Duration(seconds: 20));
+    } finally {
+      await sub.cancel();
+    }
+  }
+
+  void _showStreamError(YoutubeSdkException error) {
+    try {
+      Get.snackbar(
+        'Can\u2019t play this song',
+        error.message,
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: 4),
+        isDismissible: true,
+        margin: const EdgeInsets.all(12),
+        borderRadius: 12,
+      );
+    } catch (_) {
+      // UI not ready (e.g. headless) — ignore.
     }
   }
 

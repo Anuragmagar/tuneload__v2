@@ -34,7 +34,6 @@ class _DownloadspageState extends State<Downloadspage> {
   void initState() {
     super.initState();
 
-    getLocalSongs();
     checkAndRequestPermissions();
   }
 
@@ -45,7 +44,12 @@ class _DownloadspageState extends State<Downloadspage> {
     );
 
     if (!mounted) return;
-    if (_hasPermission) setState(() {});
+    if (_hasPermission) {
+      setState(() {});
+      // Only query songs AFTER permission is granted. Calling querySongs
+      // before permission triggers a native "Reply already submitted" crash.
+      getLocalSongs();
+    }
   }
 
   @override

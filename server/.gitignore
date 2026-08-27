@@ -1,0 +1,9 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local secrets / config
+.env
