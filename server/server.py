@@ -167,23 +167,36 @@ PLAYER_CLIENTS = [
     "tv_embedded",
 ]
 
+# Working client order. The first client that succeeds is moved to the front
+# so subsequent resolutions are fast (no re-trying known-broken clients on a
+# flagged IP). Guarded by _URL_CACHE_LOCK.
+_CLIENT_ORDER = list(PLAYER_CLIENTS)
+
 
 def _info_with_clients(video_id):
     last_err = None
-    for client in PLAYER_CLIENTS:
+    with _URL_CACHE_LOCK:
+        order = list(_CLIENT_ORDER)
+    for client in order:
         opts = {
             "format": "bestaudio/best",
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
+            "socket_timeout": 15,
             "extractor_args": {"youtube": {"player_client": [client]}},
         }
         if os.path.exists(COOKIES_FILE):
             opts["cookiefile"] = COOKIES_FILE
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
-                return ydl.extract_info(video_id, download=False)
+                info = ydl.extract_info(video_id, download=False)
+            # Promote the working client to the front for next time.
+            with _URL_CACHE_LOCK:
+                _CLIENT_ORDER.remove(client)
+                _CLIENT_ORDER.insert(0, client)
+            return info
         except Exception as e:  # noqa: BLE001
             last_err = e
             continue

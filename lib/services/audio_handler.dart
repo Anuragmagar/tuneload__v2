@@ -6,6 +6,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:tuneload/manager/audio_player_manager.dart';
 import 'package:tuneload/models/song_item.dart';
+import 'package:tuneload/config.dart';
 import 'package:tuneload/services/stream_service.dart';
 import 'package:tuneload/services/youtube_sdk_exception.dart';
 
@@ -36,58 +37,44 @@ class AudioHandler {
       isLoadingStream.value = true;
       currentSong.value = song;
 
-      // Try each YouTube client in order. A client may resolve a URL that
-      // still fails to play (YouTube 403s the actual stream), so we only
-      // accept a client whose stream actually starts playing.
       var lastError = YoutubeSdkException(
         'Could not get the song link right now. Please try again.',
       );
       var succeeded = false;
 
-      for (final client in StreamService.clients) {
-        if (succeeded) break;
-        try {
-          _resolvedUrl = await StreamService.resolveStreamUrlWithClient(
-            song.videoId,
-            client,
+      if (AppConfig.preferServer && StreamService.isServerFallbackConfigured) {
+        // Go straight to the server proxy (faster/more reliable on flagged
+        // networks). No slow direct-client attempts.
+        succeeded = await _tryServerProxy(song);
+        if (!succeeded) {
+          lastError = YoutubeSdkException(
+            'Could not play this song via the server. Please try again.',
           );
-          await _tryPlayResolved();
-          succeeded = true;
-        } catch (e) {
-          debugPrint('AudioHandler: client failed to play: $e');
-          lastError = e is YoutubeSdkException
-              ? e
-              : YoutubeSdkException.fromYoutube(e);
-          await player.stop();
         }
-      }
-
-      // If every direct client is blocked (e.g. this device's IP is
-      // bot-flagged), fall back to the server-side proxy. First hit /stream to
-      // warm the server (Render cold-starts can take ~30-50s) and confirm the
-      // video resolves, then play the /proxy endpoint that relays the audio.
-      // Retry because Render's free tier is transiently flaky (cold-start 502s).
-      if (!succeeded && StreamService.isServerFallbackConfigured) {
-        for (var attempt = 1; attempt <= 3; attempt++) {
+      } else {
+        // Try each YouTube client in order. A client may resolve a URL that
+        // still fails to play (YouTube 403s the actual stream), so we only
+        // accept a client whose stream actually starts playing.
+        for (final client in StreamService.clients) {
+          if (succeeded) break;
           try {
-            await StreamService.resolveStreamUrlFromServer(song.videoId);
-            _resolvedUrl =
-                StreamService.resolveProxyUrlFromServer(song.videoId);
+            _resolvedUrl = await StreamService.resolveStreamUrlWithClient(
+              song.videoId,
+              client,
+            );
             await _tryPlayResolved();
             succeeded = true;
-            break;
           } catch (e) {
-            debugPrint(
-              'AudioHandler: server fallback attempt $attempt/3 failed: $e',
-            );
+            debugPrint('AudioHandler: client failed to play: $e');
             lastError = e is YoutubeSdkException
                 ? e
                 : YoutubeSdkException.fromYoutube(e);
             await player.stop();
-            if (attempt < 3) {
-              await Future<void>.delayed(const Duration(seconds: 3));
-            }
           }
+        }
+
+        if (!succeeded && StreamService.isServerFallbackConfigured) {
+          succeeded = await _tryServerProxy(song);
         }
       }
 
@@ -98,6 +85,29 @@ class AudioHandler {
     } finally {
       isLoadingStream.value = false;
     }
+  }
+
+  /// Attempts to play via the server proxy. Warms the server by resolving
+  /// first, then plays the relayed audio. Retries on the free tier's
+  /// transient 502s/cold-starts. Returns true on success.
+  Future<bool> _tryServerProxy(SongItem song) async {
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await StreamService.resolveStreamUrlFromServer(song.videoId);
+        _resolvedUrl = StreamService.resolveProxyUrlFromServer(song.videoId);
+        await _tryPlayResolved();
+        return true;
+      } catch (e) {
+        debugPrint(
+          'AudioHandler: server proxy attempt $attempt/3 failed: $e',
+        );
+        await player.stop();
+        if (attempt < 3) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+        }
+      }
+    }
+    return false;
   }
 
   // Plays the currently resolved URL.

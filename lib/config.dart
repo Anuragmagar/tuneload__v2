@@ -14,4 +14,10 @@ class AppConfig {
   /// Leave empty if the server has no auth.
   static const String streamServerUser = '';
   static const String streamServerPass = '';
+
+  /// When true, the app skips direct youtube_explode_dart extraction entirely
+  /// and plays straight through the server proxy. Faster and more reliable,
+  /// but depends on the server being up. When false, it tries direct
+  /// extraction first and only uses the server as a fallback.
+  static const bool preferServer = true;
 }
